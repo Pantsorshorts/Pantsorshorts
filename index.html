@@ -176,12 +176,12 @@
                 </div>
             </div>
 
-            <!-- NEW INPUT FIELD FOR MANUAL LOCATION FALLBACK -->
+            <!-- INPUT FIELD FOR MANUAL LOCATION FALLBACK -->
             <div class="w-full pt-4">
-                <label for="location-input" class="block text-sm font-medium text-gray-600 mb-1">
-                    Or, enter a City/ZIP (Required if location permission is denied):
+                <label for="location-input" class="block text-sm font-medium text-red-500 mb-1 font-bold">
+                    <span class="text-gray-600">Enter a City/ZIP:</span> (Required if GeoLocation is denied)
                 </label>
-                <input type="text" id="location-input" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-lg" placeholder="e.g., New York, NY or 10001">
+                <input type="text" id="location-input" class="w-full p-3 border-2 border-red-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-lg" placeholder="e.g., New York, NY or 10001">
             </div>
             <!-- END NEW INPUT FIELD -->
 
@@ -268,36 +268,38 @@
 
         /**
          * Attempts to get location via GeoLocation, or falls back to user input.
-         * Returns an object that either contains {latitude, longitude} OR {inputLocation} OR {error}.
+         * Returns an object that either contains {latitude, longitude} OR {inputLocation}.
+         * Throws an error if neither is available.
          */
         function getLocationData() {
             const inputLocation = document.getElementById('location-input').value.trim();
             document.getElementById('status-message').textContent = 'Requesting location permission...';
             
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
                 if (navigator.geolocation) {
                     navigator.geolocation.getCurrentPosition(
                         (position) => {
-                            // Success: GPS available
+                            // Success: GPS available. Use coordinates.
                             resolve({
                                 latitude: position.coords.latitude,
-                                longitude: position.coords.longitude,
-                                inputLocation: inputLocation // Include inputLocation for robust Gemini query
+                                longitude: position.coords.longitude
                             });
                         },
                         (error) => {
-                            // Failure: Check if user provided manual location
+                            // Failure: GeoLocation denied or failed.
                             if (inputLocation) {
+                                // Fallback 1: Use manual input if GPS failed.
                                 document.getElementById('status-message').textContent = 'Geolocation failed, using provided city/zip.';
                                 resolve({ inputLocation: inputLocation });
                             } else {
+                                // Fallback 2: No GPS and no manual input. REJECT.
                                 let errorMessage;
                                 if (error.code === error.PERMISSION_DENIED) {
                                     errorMessage = "Geolocation permission denied. Please enable location or enter a City/ZIP.";
                                 } else {
                                     errorMessage = `Geolocation failed: ${error.message}. Please enter a City/ZIP.`;
                                 }
-                                resolve({ error: errorMessage }); 
+                                reject(new Error(errorMessage)); 
                             }
                         }
                     );
@@ -307,7 +309,7 @@
                         document.getElementById('status-message').textContent = 'Geolocation unsupported, using provided city/zip.';
                         resolve({ inputLocation: inputLocation });
                     } else {
-                        resolve({ error: "Geolocation is not supported by your browser. Please enter a City/ZIP." });
+                        reject(new Error("Geolocation is not supported by your browser. Please enter a City/ZIP."));
                     }
                 }
             });
@@ -337,7 +339,7 @@
             let userQuery;
 
             if (locationData.latitude && locationData.longitude) {
-                // Prioritize GPS coordinates, but mention manual input for context if available
+                // Prioritize GPS coordinates
                 userQuery = `What are the current, daily high, and daily low temperatures in Fahrenheit for coordinates: latitude ${locationData.latitude} and longitude ${locationData.longitude} today? What is the name of the location?`;
             } else if (locationData.inputLocation) {
                 // Fallback to manual city/zip input
@@ -393,11 +395,27 @@
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 
                 const result = await response.json();
-                const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                let jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
                 
                 if (!jsonText) throw new Error("API response was empty or malformed.");
+
+                // Robustly clean the string to ensure it's pure JSON
+                jsonText = jsonText.trim();
+                if (jsonText.startsWith('```json')) {
+                    jsonText = jsonText.substring(7);
+                }
+                if (jsonText.endsWith('```')) {
+                    jsonText = jsonText.substring(0, jsonText.length - 3);
+                }
+                jsonText = jsonText.trim(); // Trim again after removing fences
                 
-                const weatherData = JSON.parse(jsonText);
+                let weatherData;
+                try {
+                    weatherData = JSON.parse(jsonText);
+                } catch(parseError) {
+                    console.error("Failed to parse JSON response. Raw text was:", jsonText, "Error:", parseError);
+                    throw new Error("API returned unparseable weather data. Try querying a major city.");
+                }
                 
                 // Return the data structured for the app's logic
                 return {
@@ -481,15 +499,16 @@
             loadingElement.classList.remove('hidden');
             resultContainer.classList.add('hidden');
             recommendationBox.className = 'recommendation-box rounded-xl text-3xl font-extrabold uppercase tracking-wider';
+            recommendationBox.textContent = 'Checking...';
             locationDisplay.textContent = 'Location: Fetching...';
+            dailyHighValue.textContent = '--';
+            dailyLowValue.textContent = '--';
+            decisionTempValue.textContent = '--';
             
             try {
                 // 1. Get Location Data (either GPS or manual input)
+                // This call will now REJECT if no location is available, flowing directly to catch.
                 const locationData = await getLocationData();
-
-                if (locationData.error) {
-                    throw new Error(locationData.error);
-                }
                 
                 // 2. Fetch Real Weather using Gemini
                 const tempsF = await fetchRealWeather(locationData);
@@ -519,11 +538,13 @@
 
             } catch (error) {
                 console.error("Failed to run check:", error);
-                // Display the specific error message from the try/catch
+                // Display the specific error message from the try/catch (now including rejections from getLocationData)
                 const userFriendlyError = String(error).includes('Error:') ? String(error).replace('Error: ', '') : 'Could not get location or weather data.';
                 document.getElementById('status-message').textContent = `Failed: ${userFriendlyError}`;
                 recommendationBox.textContent = 'Error fetching data.';
                 recommendationBox.classList.add('bg-red-200', 'text-red-800');
+                locationDisplay.textContent = 'Location: Failed';
+
             } finally {
                 loadingElement.classList.add('hidden');
                 resultContainer.classList.remove('hidden');
