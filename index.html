@@ -186,9 +186,9 @@
             <!-- INPUT FIELD FOR MANUAL LOCATION FALLBACK -->
             <div class="w-full pt-4">
                 <label for="location-input" class="block text-sm font-medium text-red-500 mb-1 font-bold">
-                    <span class="text-gray-600">Enter a City/ZIP:</span> (Required if GeoLocation is denied)
+                    <span class="text-gray-600">Enter a **US** City or 5-digit ZIP Code:</span> (Required if GeoLocation is denied)
                 </label>
-                <input type="text" id="location-input" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-lg" placeholder="e.g., New York, NY or 10001">
+                <input type="text" id="location-input" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-lg" placeholder="e.g., New York or 10001">
             </div>
             <!-- END INPUT FIELDS -->
 
@@ -250,7 +250,7 @@
     <script>
         // === CORE CONFIGURATION ===
         // 🚨 IMPORTANT: REPLACE THIS PLACEHOLDER WITH YOUR ACTUAL OPENWEATHERMAP API KEY
-        const HARDCODED_API_KEY = "89ac443008c143b60f9bee3d2e399a69"; 
+        const HARDCODED_API_KEY = "YOUR_OPENWEATHERMAP_API_KEY_HERE"; 
         // ==========================
 
         const fahrenheitToCelsius = (f) => (f - 32) * 5 / 9;
@@ -305,16 +305,16 @@
                             // Failure: Geolocation denied or failed
                             let errorMessage;
                             if (error.code === error.PERMISSION_DENIED) {
-                                errorMessage = "GeoLocation denied. Please enter a City/ZIP.";
+                                errorMessage = "GeoLocation denied. Please enter a US City/ZIP.";
                             } else {
-                                errorMessage = `GeoLocation failed: ${error.message}. Please enter a City/ZIP.`;
+                                errorMessage = `GeoLocation failed: ${error.message}. Please enter a US City/ZIP.`;
                             }
                             resolve({ error: errorMessage }); 
                         }
                     );
                 } else {
                     // Browser does not support geolocation
-                    resolve({ error: "GeoLocation is not supported. Please enter a City/ZIP." });
+                    resolve({ error: "GeoLocation is not supported. Please enter a US City/ZIP." });
                 }
             });
         }
@@ -325,8 +325,7 @@
          * @returns {Promise<{current: number, high: number, low: number, locationName: string}>} Temperatures in Fahrenheit.
          */
         async function fetchOpenWeatherMap(locationData, apiKey, unit) {
-            // Note: API Key check is moved to the top of runCheck, but we can do a sanity check here too.
-            if (!apiKey || apiKey === "YOUR_OPENWEATHERMAP_API_KEY_HERE") {
+            if (!apiKey || apiKey === "89ac443008c143b60f9bee3d2e399a69") {
                 throw new Error("API Key Missing: The key is not set in the HARDCODED_API_KEY constant in the source code.");
             }
             
@@ -336,9 +335,18 @@
 
             let url;
             if (locationData.latitude && locationData.longitude) {
+                // If using coordinates, no country restriction is needed
                 url = `${OWM_API_URL}lat=${locationData.latitude}&lon=${locationData.longitude}&units=${unitsParam}&appid=${apiKey}`;
             } else if (locationData.inputLocation) {
-                url = `${OWM_API_URL}q=${encodeURIComponent(locationData.inputLocation)}&units=${unitsParam}&appid=${apiKey}`;
+                let query = locationData.inputLocation;
+                
+                // === START: US-ONLY RESTRICTION LOGIC ===
+                // Append ', US' to explicitly restrict the search to the United States.
+                // This is crucial for accurate ZIP code resolution and prioritizing US cities.
+                query = `${query}, US`; 
+                // === END: US-ONLY RESTRICTION LOGIC ===
+
+                url = `${OWM_API_URL}q=${encodeURIComponent(query)}&units=${unitsParam}&appid=${apiKey}`;
             } else {
                 throw new Error("No location information available to query OpenWeatherMap.");
             }
@@ -354,7 +362,7 @@
                     if (response.status === 401) {
                         errorMessage = "API Error 401: Unauthorized. Check if your hardcoded OpenWeatherMap API Key is correct and active.";
                     } else if (response.status === 404) {
-                        errorMessage = `API Error 404: Location not found for "${locationData.inputLocation || 'coordinates'}".`;
+                        errorMessage = `API Error 404: Location not found for "${locationData.inputLocation}". (US only).`;
                         document.getElementById('location-input').classList.add('border-red-500', 'ring-4', 'ring-red-200');
                     } else {
                         errorMessage = `HTTP error! Status: ${response.status}. Message: ${data.message || 'Unknown error'}`;
@@ -451,7 +459,7 @@
             const recommendationBox = document.getElementById('recommendation-box');
             
             // Initial key validation
-            if (!apiKey || apiKey === "YOUR_OPENWEATHERMAP_API_KEY_HERE") {
+            if (!apiKey || apiKey === "89ac443008c143b60f9bee3d2e399a69") {
                  document.getElementById('status-message').textContent = 'Error: API Key is not set in the source code.';
                  recommendationBox.textContent = 'API KEY REQUIRED';
                  recommendationBox.classList.add('bg-red-200', 'text-red-800');
@@ -515,8 +523,8 @@
                 locationDisplay.textContent = 'Location: Failed';
 
                 // Specific error overrides for common failures
-                if (errorString.includes('GeoLocation denied') || errorString.includes('Please enter a City/ZIP')) {
-                    userFriendlyError = "LOCATION REQUIRED: Please enter a City/ZIP above and press Save & Check.";
+                if (errorString.includes('GeoLocation denied') || errorString.includes('Please enter a US City/ZIP')) {
+                    userFriendlyError = "LOCATION REQUIRED: Please enter a US City/ZIP above and press Save & Check.";
                     document.getElementById('location-input').classList.add('border-red-500', 'ring-4', 'ring-red-200');
                 } else if (errorString.includes('API Key Missing')) {
                     userFriendlyError = "API KEY REQUIRED: Please set the hardcoded key in the source code.";
