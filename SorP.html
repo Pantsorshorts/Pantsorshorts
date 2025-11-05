@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pants or Shorts Decision App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- START: Mobile Optimization / PWA Prep Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#3f72af">
+    <!-- END: Mobile Optimization / PWA Prep Meta Tags -->
+
+    <!-- Load Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the environment (MUST be defined)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // --- Firebase Initialization and Auth ---
+        let db, auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        window.firebaseInit = async function() {
+            try {
+                // setLogLevel('debug'); // Uncomment for debugging
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Sign in using custom token or anonymously
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        document.getElementById('user-id-display').textContent = `User ID: ${userId}`;
+                    } else {
+                        // Use a fallback random ID if authentication fails or is not ready
+                        userId = localStorage.getItem('localUserId') || crypto.randomUUID();
+                        localStorage.setItem('localUserId', userId);
+                        document.getElementById('user-id-display').textContent = `User ID (Anon): ${userId}`;
+                    }
+                    isAuthReady = true;
+                    // Once Auth is ready, load settings and run the check
+                    window.loadSettingsAndRunCheck();
+                });
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                document.getElementById('status-message').textContent = 'Error: Firebase failed to initialize.';
+                isAuthReady = true; // Still mark ready to allow app logic to run without persistence
+                window.loadSettingsAndRunCheck();
+            }
+        }
+
+        // --- Firestore Persistence Functions ---
+
+        /** Gets the document reference path for private user settings. */
+        const getSettingsRef = () => doc(db, 'artifacts', appId, 'users', userId, 'preferences', 'pants-shorts-threshold');
+
+        window.saveSettings = async function(settings) {
+            if (!isAuthReady || !db || !userId) {
+                console.warn("Firestore not ready or user ID missing. Cannot save settings.");
+                return;
+            }
+            try {
+                await setDoc(getSettingsRef(), settings);
+                console.log("Settings saved successfully.");
+            } catch (error) {
+                console.error("Error saving settings:", error);
+            }
+        }
+
+        window.loadSettings = async function() {
+            if (!isAuthReady || !db || !userId) {
+                console.warn("Firestore not ready or user ID missing. Cannot load settings.");
+                return { threshold: 70, unit: 'F' }; // Default fallback
+            }
+            try {
+                const docSnap = await getDoc(getSettingsRef());
+                if (docSnap.exists()) {
+                    console.log("Settings loaded:", docSnap.data());
+                    return docSnap.data();
+                } else {
+                    console.log("No settings found, using default.");
+                    return { threshold: 70, unit: 'F' }; // Default threshold
+                }
+            } catch (error) {
+                console.error("Error loading settings:", error);
+                return { threshold: 70, unit: 'F' }; // Default fallback on error
+            }
+        }
+
+        // Start initialization on window load
+        window.onload = window.firebaseInit;
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9;
+        }
+        .card {
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 5px 10px -5px rgba(0, 0, 0, 0.04);
+            transition: all 0.3s ease-in-out;
+        }
+        .recommendation-box {
+            min-height: 120px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.6s ease;
+        }
+        /* Custom styles for the result */
+        .result-pants {
+            background-color: #3f72af; /* Deep Blue */
+            color: white;
+        }
+        .result-shorts {
+            background-color: #fce700; /* Bright Yellow */
+            color: #1f2937; /* Dark Gray */
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8 flex items-center justify-center">
+
+    <div id="app" class="w-full max-w-lg space-y-8">
+        <header class="text-center">
+            <h1 class="text-4xl font-extrabold text-gray-800 tracking-tight">
+                Wardrobe Weather Assistant
+            </h1>
+            <p class="text-gray-500 mt-1">Pants or Shorts? Let your temperature preference decide.</p>
+        </header>
+
+        <!-- Configuration Card -->
+        <div class="card bg-white p-6 rounded-xl space-y-6">
+            <h2 class="text-2xl font-semibold text-gray-700 border-b pb-3 mb-4">
+                Your Comfort Threshold
+            </h2>
+            
+            <div class="flex flex-col sm:flex-row items-end sm:space-x-4 space-y-4 sm:space-y-0">
+                <div class="flex-grow w-full">
+                    <label for="threshold" class="block text-sm font-medium text-gray-600 mb-1">
+                        I wear <span id="garment-preview" class="font-bold text-indigo-600">shorts</span> when it is at or above:
+                    </label>
+                    <input type="number" id="threshold" value="70" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-lg" placeholder="e.g., 75">
+                </div>
+                
+                <div class="w-full sm:w-auto">
+                    <label for="unit" class="block text-sm font-medium text-gray-600 mb-1">
+                        Unit
+                    </label>
+                    <select id="unit" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-lg">
+                        <option value="F">Fahrenheit (°F)</option>
+                        <option value="C">Celsius (°C)</option>
+                    </select>
+                </div>
+            </div>
+
+            <button onclick="saveAndCheck()" class="w-full py-3 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md hover:shadow-lg">
+                Save Preference & Check Today
+            </button>
+        </div>
+
+        <!-- Result Card -->
+        <div class="card bg-white p-6 rounded-xl space-y-4">
+            <h2 class="text-2xl font-semibold text-gray-700 border-b pb-3 mb-4">
+                Today's Recommendation
+            </h2>
+
+            <div id="loading" class="text-center p-6 text-gray-500">
+                <svg class="animate-spin h-5 w-5 text-indigo-500 inline-block mr-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Fetching weather and loading settings...
+            </div>
+
+            <div id="result-container" class="hidden">
+                <!-- Location Display -->
+                <p id="location-display" class="text-center text-sm font-semibold text-indigo-600 mb-2">
+                    Location: --
+                </p>
+                <!-- Daily High/Low Display -->
+                <div class="flex justify-around text-center mb-6 text-gray-700">
+                    <div>
+                        <p class="text-sm font-medium">Daily High</p>
+                        <p id="daily-high-value" class="text-2xl font-bold text-red-500">--</p>
+                    </div>
+                    <div>
+                        <p class="text-sm font-medium">Daily Low</p>
+                        <p id="daily-low-value" class="text-2xl font-bold text-blue-500">--</p>
+                    </div>
+                </div>
+
+                <!-- Recommendation Box uses the High Temp as the decision point -->
+                <p id="decision-temp-display" class="text-center text-gray-600 mb-4 text-lg font-medium">
+                    Decision based on High Temp: <span id="current-temp-value" class="font-bold text-gray-800 text-xl">--</span>
+                </p>
+                <div id="recommendation-box" class="recommendation-box rounded-xl text-3xl font-extrabold uppercase tracking-wider">
+                    <!-- Recommendation will be injected here -->
+                </div>
+            </div>
+            
+        </div>
+        
+        <!-- Debug/Status Footer -->
+        <div class="text-xs text-gray-400 text-center space-y-1 pt-4">
+            <p id="user-id-display">User ID: Loading...</p>
+            <p id="status-message">Ready.</p>
+        </div>
+
+    </div>
+
+    <script>
+        // Use a function to convert F to C
+        const fahrenheitToCelsius = (f) => (f - 32) * 5 / 9;
+
+        // --- Core Application State & Logic ---
+        let userThreshold = 70;
+        let userUnit = 'F';
+
+        document.getElementById('threshold').addEventListener('input', updateGarmentPreview);
+        document.getElementById('unit').addEventListener('change', updateGarmentPreview);
+
+        function updateGarmentPreview() {
+            const thresholdInput = document.getElementById('threshold');
+            const previewElement = document.getElementById('garment-preview');
+            
+            // Check if the input is empty or invalid
+            if (thresholdInput.value === '' || isNaN(parseFloat(thresholdInput.value))) {
+                previewElement.textContent = 'shorts';
+                return;
+            }
+            
+            // The logic is: shorts are worn AT OR ABOVE this temperature.
+            // Therefore, pants are worn BELOW this temperature.
+            previewElement.textContent = 'shorts';
+        }
+
+        /**
+         * Uses the browser's Geolocation API to get the user's coordinates.
+         * @returns {Promise<{latitude: number, longitude: number}>}
+         */
+        function getUserLocation() {
+            document.getElementById('status-message').textContent = 'Requesting location permission...';
+            return new Promise((resolve, reject) => {
+                if (!navigator.geolocation) {
+                    reject('Geolocation is not supported by your browser.');
+                    return;
+                }
+
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        resolve({
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude
+                        });
+                    },
+                    (error) => {
+                        let errorMessage;
+                        switch(error.code) {
+                            case error.PERMISSION_DENIED:
+                                errorMessage = "Error: Geolocation permission denied. Please enable location services and reload.";
+                                break;
+                            case error.POSITION_UNAVAILABLE:
+                                errorMessage = "Error: Location information is unavailable.";
+                                break;
+                            case error.TIMEOUT:
+                                errorMessage = "Error: The request to get user location timed out.";
+                                break;
+                            default:
+                                errorMessage = `Error getting location: ${error.message}`;
+                                break;
+                        }
+                        reject(errorMessage);
+                    }
+                );
+            });
+        }
+
+        /**
+         * Fetches real-time weather using Gemini API with Google Search grounding.
+         * @returns {Promise<{current: number, high: number, low: number, locationName: string}>} Temperatures in Fahrenheit.
+         */
+        async function fetchRealWeather(latitude, longitude) {
+            document.getElementById('status-message').textContent = 'Fetching real-time weather using Gemini...';
+
+            // Define the structure for the response
+            const responseSchema = {
+                type: "OBJECT",
+                properties: {
+                    "currentTempF": { "type": "NUMBER" },
+                    "highTempF": { "type": "NUMBER" },
+                    "lowTempF": { "type": "NUMBER" },
+                    "locationName": { "type": "STRING" }
+                },
+                required: ["currentTempF", "highTempF", "lowTempF", "locationName"]
+            };
+
+            const systemPrompt = `You are a helpful weather assistant. Use the Google Search grounding tool to find the current weather forecast for the given latitude and longitude. Respond ONLY with a JSON object that strictly matches the provided schema. Provide the current, daily high, and daily low temperatures for today, all in Fahrenheit (°F), and the name of the city/area. Do not include units (like '°F') in the JSON values, only the numbers.`;
+            
+            const userQuery = `What are the current, daily high, and daily low temperatures in Fahrenheit for latitude ${latitude} and longitude ${longitude} today? What is the name of the location?`;
+            
+            const apiKey = ""; // Leave as-is
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                tools: [{ "google_search": {} }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: responseSchema
+                }
+            };
+            
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                const result = await response.json();
+                const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                
+                if (!jsonText) throw new Error("API response was empty or malformed.");
+                
+                const weatherData = JSON.parse(jsonText);
+                
+                // Return the data structured for the app's logic
+                return {
+                    current: weatherData.currentTempF,
+                    high: weatherData.highTempF,
+                    low: weatherData.lowTempF,
+                    locationName: weatherData.locationName || 'Unknown Location'
+                };
+
+            } catch (error) {
+                console.error("Gemini API call failed:", error);
+                // Throw an explicit error to be caught by runCheck
+                throw new Error("Failed to retrieve real-time weather data.");
+            }
+        }
+
+        function getRecommendation(decisionTempF, threshold, unit) {
+            let decisionTemp;
+            let thresholdTemp;
+
+            if (unit === 'C') {
+                // Convert both to Celsius for comparison
+                decisionTemp = fahrenheitToCelsius(decisionTempF);
+                thresholdTemp = parseFloat(threshold);
+            } else {
+                // Use Fahrenheit for comparison
+                decisionTemp = decisionTempF;
+                thresholdTemp = parseFloat(threshold);
+            }
+
+            // The rule: threshold and up means shorts, under threshold means pants.
+            if (decisionTemp >= thresholdTemp) {
+                return {
+                    garment: 'Shorts',
+                    color: 'result-shorts'
+                };
+            } else {
+                return {
+                    garment: 'Pants',
+                    color: 'result-pants'
+                };
+            }
+        }
+
+        async function saveAndCheck() {
+            const thresholdInput = document.getElementById('threshold');
+            const unitSelect = document.getElementById('unit');
+
+            userThreshold = parseFloat(thresholdInput.value);
+            userUnit = unitSelect.value;
+            
+            if (isNaN(userThreshold)) {
+                document.getElementById('status-message').textContent = 'Error: Please enter a valid number for the threshold.';
+                return;
+            }
+
+            const settings = {
+                threshold: userThreshold,
+                unit: userUnit
+            };
+
+            // Save settings to Firestore
+            if (typeof window.saveSettings === 'function') {
+                await window.saveSettings(settings);
+            }
+
+            // Run the main check
+            await runCheck(userThreshold, userUnit);
+        }
+        
+        // This function runs the main logic flow
+        async function runCheck(threshold, unit) {
+            const loadingElement = document.getElementById('loading');
+            const resultContainer = document.getElementById('result-container');
+            const locationDisplay = document.getElementById('location-display');
+            const dailyHighValue = document.getElementById('daily-high-value');
+            const dailyLowValue = document.getElementById('daily-low-value');
+            const decisionTempValue = document.getElementById('current-temp-value');
+            const recommendationBox = document.getElementById('recommendation-box');
+            
+            loadingElement.classList.remove('hidden');
+            resultContainer.classList.add('hidden');
+            recommendationBox.className = 'recommendation-box rounded-xl text-3xl font-extrabold uppercase tracking-wider';
+            locationDisplay.textContent = 'Location: Fetching...';
+            
+            try {
+                // 1. Get User Location
+                const location = await getUserLocation();
+                
+                // 2. Fetch Real Weather using Gemini
+                const tempsF = await fetchRealWeather(location.latitude, location.longitude);
+                
+                // We use the High Temperature for the recommendation logic
+                const decisionTempF = tempsF.high;
+
+                // 3. Determine Recommendation
+                const recommendation = getRecommendation(decisionTempF, threshold, unit);
+
+                // 4. Prepare display values
+                // Helper to format temperature based on selected unit
+                const formatTemp = (tempF) => unit === 'F' 
+                    ? `${tempF.toFixed(0)}°F`
+                    : `${fahrenheitToCelsius(tempF).toFixed(0)}°C`;
+                
+                // 5. Update UI
+                locationDisplay.textContent = `Location: ${tempsF.locationName}`;
+                dailyHighValue.textContent = formatTemp(tempsF.high);
+                dailyLowValue.textContent = formatTemp(tempsF.low);
+                decisionTempValue.textContent = formatTemp(decisionTempF); // The High Temp is the decision temperature
+                
+                recommendationBox.textContent = `Today calls for ${recommendation.garment}!`;
+                recommendationBox.classList.add(recommendation.color);
+                
+                document.getElementById('status-message').textContent = 'Successfully checked daily forecast.';
+
+            } catch (error) {
+                console.error("Failed to run check:", error);
+                // Display the specific error message from the try/catch
+                const userFriendlyError = String(error).includes('Error:') ? String(error).replace('Error: ', '') : 'Could not get location or weather data.';
+                document.getElementById('status-message').textContent = `Failed: ${userFriendlyError}`;
+                recommendationBox.textContent = 'Error fetching data.';
+                recommendationBox.classList.add('bg-red-200', 'text-red-800');
+            } finally {
+                loadingElement.classList.add('hidden');
+                resultContainer.classList.remove('hidden');
+            }
+        }
+        
+        // Function called after Firebase initialization is complete
+        window.loadSettingsAndRunCheck = async function() {
+            const thresholdInput = document.getElementById('threshold');
+            const unitSelect = document.getElementById('unit');
+            
+            if (typeof window.loadSettings === 'function') {
+                const loadedSettings = await window.loadSettings();
+                thresholdInput.value = loadedSettings.threshold;
+                unitSelect.value = loadedSettings.unit;
+                userThreshold = loadedSettings.threshold;
+                userUnit = loadedSettings.unit;
+            }
+            
+            updateGarmentPreview();
+            await runCheck(userThreshold, userUnit);
+        }
+
+    </script>
+</body>
+</html>
