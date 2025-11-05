@@ -337,21 +337,28 @@
             if (locationData.latitude && locationData.longitude) {
                 // If using coordinates, no country restriction is needed
                 url = `${OWM_API_URL}lat=${locationData.latitude}&lon=${locationData.longitude}&units=${unitsParam}&appid=${apiKey}`;
+                document.getElementById('status-message').textContent = 'Fetching weather using GPS coordinates...';
             } else if (locationData.inputLocation) {
-                let query = locationData.inputLocation;
+                let query = locationData.inputLocation.trim();
                 
-                // === START: US-ONLY RESTRICTION LOGIC ===
-                // Append ', US' to explicitly restrict the search to the United States.
-                // This is crucial for accurate ZIP code resolution and prioritizing US cities.
-                query = `${query}, US`; 
-                // === END: US-ONLY RESTRICTION LOGIC ===
+                // Regex to check for a 5-digit number (US ZIP code format)
+                const isZipCode = /^\d{5}$/.test(query);
 
-                url = `${OWM_API_URL}q=${encodeURIComponent(query)}&units=${unitsParam}&appid=${apiKey}`;
+                if (isZipCode) {
+                    // Use the specific ZIP code endpoint format for maximum accuracy in the US.
+                    url = `${OWM_API_URL}zip=${query},US&units=${unitsParam}&appid=${apiKey}`;
+                    document.getElementById('status-message').textContent = `Fetching weather for ZIP code ${query} in US...`;
+                } else {
+                    // Fallback to city name search, explicitly restricted to the US.
+                    query = `${query}, US`; 
+                    url = `${OWM_API_URL}q=${encodeURIComponent(query)}&units=${unitsParam}&appid=${apiKey}`;
+                    document.getElementById('status-message').textContent = `Fetching weather for City/State: ${query}...`;
+                }
             } else {
                 throw new Error("No location information available to query OpenWeatherMap.");
             }
             
-            document.getElementById('status-message').textContent = `Fetching weather from OpenWeatherMap in ${unitSymbol}...`;
+            
 
             try {
                 const response = await fetch(url);
