@@ -181,7 +181,8 @@
                 <label for="location-input" class="block text-sm font-medium text-red-500 mb-1 font-bold">
                     <span class="text-gray-600">Enter a City/ZIP:</span> (Required if GeoLocation is denied)
                 </label>
-                <input type="text" id="location-input" class="w-full p-3 border-2 border-red-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-lg" placeholder="e.g., New York, NY or 10001">
+                <!-- Initial border is set to gray-300. Custom classes will be added on error. -->
+                <input type="text" id="location-input" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-lg" placeholder="e.g., New York, NY or 10001">
             </div>
             <!-- END NEW INPUT FIELD -->
 
@@ -481,6 +482,9 @@
             if (typeof window.saveSettings === 'function') {
                 await window.saveSettings(settings);
             }
+            
+            // Immediately clear location input error styles when the user attempts a new check
+            document.getElementById('location-input').classList.remove('border-red-500', 'ring-4', 'ring-red-200');
 
             // Run the main check
             await runCheck(userThreshold, userUnit);
@@ -507,7 +511,6 @@
             
             try {
                 // 1. Get Location Data (either GPS or manual input)
-                // This call will now REJECT if no location is available, flowing directly to catch.
                 const locationData = await getLocationData();
                 
                 // 2. Fetch Real Weather using Gemini
@@ -532,16 +535,36 @@
                 decisionTempValue.textContent = formatTemp(decisionTempF); // The High Temp is the decision temperature
                 
                 recommendationBox.textContent = `Today calls for ${recommendation.garment}!`;
+                recommendationBox.classList.remove('bg-red-200', 'text-red-800');
                 recommendationBox.classList.add(recommendation.color);
                 
+                // Clear any previous location input error styles on success
+                document.getElementById('location-input').classList.remove('border-red-500', 'ring-4', 'ring-red-200');
+
                 document.getElementById('status-message').textContent = 'Successfully checked daily forecast.';
 
             } catch (error) {
                 console.error("Failed to run check:", error);
-                // Display the specific error message from the try/catch (now including rejections from getLocationData)
-                const userFriendlyError = String(error).includes('Error:') ? String(error).replace('Error: ', '') : 'Could not get location or weather data.';
+                
+                const errorString = String(error);
+                let userFriendlyError;
+                
+                recommendationBox.classList.remove('result-pants', 'result-shorts'); // Clear previous colors
+
+                // Specific check for the Geolocation failure error
+                if (errorString.includes('Geolocation permission denied') || errorString.includes('Please enter a City/ZIP')) {
+                    userFriendlyError = "LOCATION REQUIRED: Please enter a City/ZIP above and press Save & Check.";
+                    recommendationBox.textContent = 'LOCATION REQUIRED';
+                    // Visually highlight the required input field
+                    document.getElementById('location-input').classList.add('border-red-500', 'ring-4', 'ring-red-200');
+                } else {
+                    userFriendlyError = errorString.includes('Error:') ? errorString.replace('Error: ', '') : 'Could not get location or weather data.';
+                    recommendationBox.textContent = 'Error fetching data.';
+                    // Ensure visual cue is removed if it's not the specific missing location error
+                    document.getElementById('location-input').classList.remove('border-red-500', 'ring-4', 'ring-red-200');
+                }
+
                 document.getElementById('status-message').textContent = `Failed: ${userFriendlyError}`;
-                recommendationBox.textContent = 'Error fetching data.';
                 recommendationBox.classList.add('bg-red-200', 'text-red-800');
                 locationDisplay.textContent = 'Location: Failed';
 
