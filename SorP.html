@@ -30,6 +30,7 @@
         let isAuthReady = false;
 
         window.firebaseInit = async function() {
+            document.getElementById('status-message').textContent = 'Connecting to Firebase...';
             try {
                 // setLogLevel('debug'); // Uncomment for debugging
                 const app = initializeApp(firebaseConfig);
@@ -38,8 +39,10 @@
 
                 // Sign in using custom token or anonymously
                 if (initialAuthToken) {
+                    document.getElementById('status-message').textContent = 'Authenticating user token...';
                     await signInWithCustomToken(auth, initialAuthToken);
                 } else {
+                    document.getElementById('status-message').textContent = 'Signing in anonymously...';
                     await signInAnonymously(auth);
                 }
 
@@ -78,8 +81,10 @@
             try {
                 await setDoc(getSettingsRef(), settings);
                 console.log("Settings saved successfully.");
+                document.getElementById('status-message').textContent = 'Settings saved.';
             } catch (error) {
                 console.error("Error saving settings:", error);
+                document.getElementById('status-message').textContent = 'Error saving settings.';
             }
         }
 
@@ -89,6 +94,7 @@
                 return { threshold: 70, unit: 'F' }; // Default fallback
             }
             try {
+                document.getElementById('status-message').textContent = 'Loading preferences...';
                 const docSnap = await getDoc(getSettingsRef());
                 if (docSnap.exists()) {
                     console.log("Settings loaded:", docSnap.data());
@@ -99,6 +105,7 @@
                 }
             } catch (error) {
                 console.error("Error loading settings:", error);
+                document.getElementById('status-message').textContent = 'Error loading preferences.';
                 return { threshold: 70, unit: 'F' }; // Default fallback on error
             }
         }
@@ -169,6 +176,15 @@
                 </div>
             </div>
 
+            <!-- NEW INPUT FIELD FOR MANUAL LOCATION FALLBACK -->
+            <div class="w-full pt-4">
+                <label for="location-input" class="block text-sm font-medium text-gray-600 mb-1">
+                    Or, enter a City/ZIP (Required if location permission is denied):
+                </label>
+                <input type="text" id="location-input" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-lg" placeholder="e.g., New York, NY or 10001">
+            </div>
+            <!-- END NEW INPUT FIELD -->
+
             <button onclick="saveAndCheck()" class="w-full py-3 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md hover:shadow-lg">
                 Save Preference & Check Today
             </button>
@@ -219,7 +235,7 @@
         <!-- Debug/Status Footer -->
         <div class="text-xs text-gray-400 text-center space-y-1 pt-4">
             <p id="user-id-display">User ID: Loading...</p>
-            <p id="status-message">Ready.</p>
+            <p id="status-message">Initializing app...</p>
         </div>
 
     </div>
@@ -251,43 +267,49 @@
         }
 
         /**
-         * Uses the browser's Geolocation API to get the user's coordinates.
-         * @returns {Promise<{latitude: number, longitude: number}>}
+         * Attempts to get location via GeoLocation, or falls back to user input.
+         * Returns an object that either contains {latitude, longitude} OR {inputLocation} OR {error}.
          */
-        function getUserLocation() {
+        function getLocationData() {
+            const inputLocation = document.getElementById('location-input').value.trim();
             document.getElementById('status-message').textContent = 'Requesting location permission...';
-            return new Promise((resolve, reject) => {
-                if (!navigator.geolocation) {
-                    reject('Geolocation is not supported by your browser.');
-                    return;
-                }
-
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        resolve({
-                            latitude: position.coords.latitude,
-                            longitude: position.coords.longitude
-                        });
-                    },
-                    (error) => {
-                        let errorMessage;
-                        switch(error.code) {
-                            case error.PERMISSION_DENIED:
-                                errorMessage = "Error: Geolocation permission denied. Please enable location services and reload.";
-                                break;
-                            case error.POSITION_UNAVAILABLE:
-                                errorMessage = "Error: Location information is unavailable.";
-                                break;
-                            case error.TIMEOUT:
-                                errorMessage = "Error: The request to get user location timed out.";
-                                break;
-                            default:
-                                errorMessage = `Error getting location: ${error.message}`;
-                                break;
+            
+            return new Promise((resolve) => {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            // Success: GPS available
+                            resolve({
+                                latitude: position.coords.latitude,
+                                longitude: position.coords.longitude,
+                                inputLocation: inputLocation // Include inputLocation for robust Gemini query
+                            });
+                        },
+                        (error) => {
+                            // Failure: Check if user provided manual location
+                            if (inputLocation) {
+                                document.getElementById('status-message').textContent = 'Geolocation failed, using provided city/zip.';
+                                resolve({ inputLocation: inputLocation });
+                            } else {
+                                let errorMessage;
+                                if (error.code === error.PERMISSION_DENIED) {
+                                    errorMessage = "Geolocation permission denied. Please enable location or enter a City/ZIP.";
+                                } else {
+                                    errorMessage = `Geolocation failed: ${error.message}. Please enter a City/ZIP.`;
+                                }
+                                resolve({ error: errorMessage }); 
+                            }
                         }
-                        reject(errorMessage);
+                    );
+                } else {
+                    // Browser does not support geolocation
+                    if (inputLocation) {
+                        document.getElementById('status-message').textContent = 'Geolocation unsupported, using provided city/zip.';
+                        resolve({ inputLocation: inputLocation });
+                    } else {
+                        resolve({ error: "Geolocation is not supported by your browser. Please enter a City/ZIP." });
                     }
-                );
+                }
             });
         }
 
@@ -295,7 +317,7 @@
          * Fetches real-time weather using Gemini API with Google Search grounding.
          * @returns {Promise<{current: number, high: number, low: number, locationName: string}>} Temperatures in Fahrenheit.
          */
-        async function fetchRealWeather(latitude, longitude) {
+        async function fetchRealWeather(locationData) {
             document.getElementById('status-message').textContent = 'Fetching real-time weather using Gemini...';
 
             // Define the structure for the response
@@ -310,9 +332,20 @@
                 required: ["currentTempF", "highTempF", "lowTempF", "locationName"]
             };
 
-            const systemPrompt = `You are a helpful weather assistant. Use the Google Search grounding tool to find the current weather forecast for the given latitude and longitude. Respond ONLY with a JSON object that strictly matches the provided schema. Provide the current, daily high, and daily low temperatures for today, all in Fahrenheit (°F), and the name of the city/area. Do not include units (like '°F') in the JSON values, only the numbers.`;
+            const systemPrompt = `You are a helpful weather assistant. Use the Google Search grounding tool to find the current weather forecast. Respond ONLY with a JSON object that strictly matches the provided schema. Provide the current, daily high, and daily low temperatures for today, all in Fahrenheit (°F), and the name of the city/area. Do not include units (like '°F') in the JSON values, only the numbers.`;
             
-            const userQuery = `What are the current, daily high, and daily low temperatures in Fahrenheit for latitude ${latitude} and longitude ${longitude} today? What is the name of the location?`;
+            let userQuery;
+
+            if (locationData.latitude && locationData.longitude) {
+                // Prioritize GPS coordinates, but mention manual input for context if available
+                userQuery = `What are the current, daily high, and daily low temperatures in Fahrenheit for coordinates: latitude ${locationData.latitude} and longitude ${locationData.longitude} today? What is the name of the location?`;
+            } else if (locationData.inputLocation) {
+                // Fallback to manual city/zip input
+                userQuery = `What are the current, daily high, and daily low temperatures in Fahrenheit for the location: ${locationData.inputLocation} today? What is the name of the location?`;
+            } else {
+                 // Should be caught by runCheck, but as a safeguard
+                throw new Error("No location data (GPS or manual input) available.");
+            }
             
             const apiKey = ""; // Leave as-is
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
@@ -328,9 +361,30 @@
                     responseSchema: responseSchema
                 }
             };
+
+            // Function for exponential backoff retry logic
+            const fetchWithRetry = async (url, options, maxRetries = 5) => {
+                for (let i = 0; i < maxRetries; i++) {
+                    try {
+                        const response = await fetch(url, options);
+                        if (response.status !== 429) return response; // Success or non-throttling error
+                        
+                        // Handle 429 (Too Many Requests) with exponential backoff
+                        const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                        console.warn(`Rate limit hit (429). Retrying in ${delay.toFixed(0)}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    } catch (error) {
+                        // For network errors, wait and retry
+                        const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                        console.warn(`Fetch error: ${error.message}. Retrying in ${delay.toFixed(0)}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                    }
+                }
+                throw new Error("Failed to fetch data after multiple retries.");
+            };
             
             try {
-                const response = await fetch(apiUrl, {
+                const response = await fetchWithRetry(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -350,7 +404,7 @@
                     current: weatherData.currentTempF,
                     high: weatherData.highTempF,
                     low: weatherData.lowTempF,
-                    locationName: weatherData.locationName || 'Unknown Location'
+                    locationName: weatherData.locationName || locationData.inputLocation || 'Unknown Location'
                 };
 
             } catch (error) {
@@ -430,11 +484,15 @@
             locationDisplay.textContent = 'Location: Fetching...';
             
             try {
-                // 1. Get User Location
-                const location = await getUserLocation();
+                // 1. Get Location Data (either GPS or manual input)
+                const locationData = await getLocationData();
+
+                if (locationData.error) {
+                    throw new Error(locationData.error);
+                }
                 
                 // 2. Fetch Real Weather using Gemini
-                const tempsF = await fetchRealWeather(location.latitude, location.longitude);
+                const tempsF = await fetchRealWeather(locationData);
                 
                 // We use the High Temperature for the recommendation logic
                 const decisionTempF = tempsF.high;
@@ -486,6 +544,7 @@
             }
             
             updateGarmentPreview();
+            // Start the main check immediately after loading settings
             await runCheck(userThreshold, userUnit);
         }
 
