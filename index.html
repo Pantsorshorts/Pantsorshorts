@@ -325,7 +325,7 @@
          * @returns {Promise<{current: number, high: number, low: number, locationName: string}>} Temperatures in Fahrenheit.
          */
         async function fetchOpenWeatherMap(locationData, apiKey, unit) {
-            if (!apiKey || apiKey === "89ac443008c143b60f9bee3d2e399a69") {
+            if (!apiKey || apiKey === "YOUR_OPENWEATHERMAP_API_KEY_HERE") {
                 throw new Error("API Key Missing: The key is not set in the HARDCODED_API_KEY constant in the source code.");
             }
             
@@ -342,12 +342,13 @@
                 let query = locationData.inputLocation.trim();
                 
                 // Regex to check for a 5-digit number (US ZIP code format)
+                // Also ensures it's not a ZIP+4 (e.g. 12345-6789)
                 const isZipCode = /^\d{5}$/.test(query);
 
                 if (isZipCode) {
                     // Use the specific ZIP code endpoint format for maximum accuracy in the US.
                     url = `${OWM_API_URL}zip=${query},US&units=${unitsParam}&appid=${apiKey}`;
-                    document.getElementById('status-message').textContent = `Fetching weather for ZIP code ${query} in US...`;
+                    document.getElementById('status-message').textContent = `Fetching weather for US ZIP code ${query}...`;
                 } else {
                     // Fallback to city name search, explicitly restricted to the US.
                     query = `${query}, US`; 
@@ -466,7 +467,7 @@
             const recommendationBox = document.getElementById('recommendation-box');
             
             // Initial key validation
-            if (!apiKey || apiKey === "89ac443008c143b60f9bee3d2e399a69") {
+            if (!apiKey || apiKey === "YOUR_OPENWEATHERMAP_API_KEY_HERE") {
                  document.getElementById('status-message').textContent = 'Error: API Key is not set in the source code.';
                  recommendationBox.textContent = 'API KEY REQUIRED';
                  recommendationBox.classList.add('bg-red-200', 'text-red-800');
@@ -575,4 +576,3 @@
     </script>
 </body>
 </html>
-
